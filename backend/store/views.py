@@ -2,14 +2,21 @@ from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from django.contrib.auth.models import User
-from .serializers import RegisterSerializer, UserSerializer
+from .serializers import RegisterSerializer, UserSerializer, UserProfileSerializer, OrderSerializer
 from rest_framework import status
-from .models import Product, Category, Cart, CartItem, Order, OrderItem
+from .models import Product, Category, Cart, CartItem, Order, OrderItem, UserProfile
 from .serializers import ProductSerializer, CategorySerializer, CartSerializer, CartItemSerializer
+from django.db.models import Q
 
 @api_view(['GET'])
 def get_products(request):
-    products = Product.objects.all()
+    products = Product.objects.select_related('category').all().order_by('-created_at')
+    search = request.query_params.get('search', '').strip()
+    category = request.query_params.get('category', '').strip()
+    if search:
+        products = products.filter(Q(name__icontains=search) | Q(description__icontains=search))
+    if category:
+        products = products.filter(category__slug=category)
     serializer = ProductSerializer(products, many=True)
     return Response(serializer.data)
 
@@ -24,7 +31,7 @@ def get_product(request, pk):
 
 @api_view(['GET'])
 def get_categories(request):
-    categories = Category.objects.all()
+    categories = Category.objects.all().order_by('name')
     serializer = CategorySerializer(categories, many=True)
     return Response(serializer.data)
 
@@ -39,7 +46,10 @@ def get_cart(request):
 @permission_classes([IsAuthenticated])
 def add_to_cart(request):
     product_id = request.data.get('product_id')
-    product = Product.objects.get(id=product_id)
+    try:
+        product = Product.objects.get(id=product_id)
+    except Product.DoesNotExist:
+        return Response({'error': 'Product not found'}, status=status.HTTP_404_NOT_FOUND)
     cart, created = Cart.objects.get_or_create(user=request.user)
     item, created = CartItem.objects.get_or_create(cart=cart, product=product)
     if not created:
@@ -57,7 +67,7 @@ def update_cart_quantity(request):
         return Response({'error': 'Item ID and quantity are required'}, status=400)
     
     try:
-        item = CartItem.objects.get(id=item_id)
+        item = CartItem.objects.get(id=item_id, cart__user=request.user)
         if int(quantity) < 1:
             item.delete()
             return Response({'error': 'Quantity must be at least 1'}, status=400)
@@ -73,7 +83,7 @@ def update_cart_quantity(request):
 @permission_classes([IsAuthenticated])
 def remove_from_cart(request):
     item_id = request.data.get('item_id')
-    CartItem.objects.filter(id=item_id).delete()
+    CartItem.objects.filter(id=item_id, cart__user=request.user).delete()
     return Response({'message': 'Item removed from cart'})
 
 @api_view(['POST'])
@@ -86,6 +96,8 @@ def create_order(request):
         phone = data.get('phone')
         payment_method = data.get('payment_method','COD')
 
+        if not name or not address or not phone:
+            return Response({'error': 'Name, address and phone number are required'}, status=status.HTTP_400_BAD_REQUEST)
         #validate Phone Number
         if not phone.isdigit() or len(phone) < 10:
             return Response({'error': 'Invalid phone number'}, status=400)
@@ -98,6 +110,11 @@ def create_order(request):
         total = sum([item.product.price * item.quantity for item in cart.items.all()])
 
         order = Order.objects.create(user = request.user, total_amount=total)
+
+        profile, _ = UserProfile.objects.get_or_create(user=request.user)
+        profile.phone = phone
+        profile.address = address
+        profile.save(update_fields=['phone', 'address'])
 
         for item in cart.items.all():
             OrderItem.objects.create(
@@ -120,3 +137,37 @@ def register_view(request):
         user = serializer.save()
         return Response({"message": "User created successfully", "user": UserSerializer(user).data}, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def profile_view(request):
+    profile, _ = UserProfile.objects.get_or_create(user=request.user)
+    if request.method == 'PATCH':
+        user = request.user
+        user.email = request.data.get('email', user.email)
+        user.save(update_fields=['email'])
+        serializer = UserProfileSerializer(profile, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        profile = serializer.save()
+    return Response(UserProfileSerializer(profile).data)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def my_orders(request):
+    orders = Order.objects.filter(user=request.user).prefetch_related('items__product').order_by('-created_at')
+    return Response(OrderSerializer(orders, many=True, context={'request': request}).data)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def cancel_order(request, order_id):
+    try:
+        order = Order.objects.get(id=order_id, user=request.user)
+    except Order.DoesNotExist:
+        return Response({'error': 'Order not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if order.status != Order.Status.PROCESSING:
+        return Response({'error': 'Only processing orders can be cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    order.status = Order.Status.CANCELLED
+    order.save(update_fields=['status'])
+    return Response({'message': 'Order cancelled successfully.', 'order': OrderSerializer(order, context={'request': request}).data})

@@ -7,6 +7,9 @@ import CheckoutPage from './pages/CheckoutPage';
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import PrivateRouter from './components/PrivateRouter';
+import OrdersPage from './pages/OrdersPage';
+import ProfilePage from './pages/ProfilePage';
+import Footer from './components/Footer';
 
 function App() {
     return (
@@ -18,10 +21,13 @@ function App() {
                 <Route path="/cart" element={<CartPage/>}/>
                 <Route element={<PrivateRouter/>}>
                     <Route path="/checkout" element={<CheckoutPage/>}/>
+                    <Route path="/orders" element={<OrdersPage/>}/>
+                    <Route path="/profile" element={<ProfilePage/>}/>
                 </Route>
                 <Route path="/login" element={<Login/>} />
                 <Route path="/signup" element={<Signup/>} />
             </Routes>
+            <Footer />
         </Router>
     );
 }

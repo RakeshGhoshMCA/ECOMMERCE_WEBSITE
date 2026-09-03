@@ -1,6 +1,7 @@
 import {Link, useNavigate} from 'react-router-dom';
+import {useEffect, useRef, useState} from 'react';
 import {useCart} from '../context/CartContext.jsx';
-import { clearTokens, getAccessToken } from '../utils/auth.js';
+import { authFetch, clearTokens, getAccessToken } from '../utils/auth.js';
 
 function Navbar() {
     const {cartItems} = useCart();
@@ -9,43 +10,72 @@ function Navbar() {
     const cartCount = cartItems.reduce((total, item) => total + item.quantity, 0);
     
     const isLoggedIn = !!getAccessToken();
+    const [profile, setProfile] = useState(null);
+    const [open, setOpen] = useState(false);
+    const menuRef = useRef(null);
+    const BASEURL = import.meta.env.VITE_DJANGO_BASE_URL;
+
+    useEffect(() => {
+        if (!isLoggedIn) return;
+        authFetch(`${BASEURL}/api/profile/`).then(res => res.ok ? res.json() : null).then(setProfile).catch(() => setProfile(null));
+    }, [isLoggedIn, BASEURL]);
+
+    useEffect(() => {
+        const closeMenu = (event) => !menuRef.current?.contains(event.target) && setOpen(false);
+        document.addEventListener('mousedown', closeMenu);
+        return () => document.removeEventListener('mousedown', closeMenu);
+    }, []);
 
     const handleLogout = () => {
         clearTokens();
+        setOpen(false);
         navigate('/login');
     };
     return (
-        <nav className='bg-white shadow-md px-6 py-6 flex justify-between items-center fixed w-full top-0 z-50'>
-            <Link to='/' className='text-2xl font-bold text-gray-800'>
-             🛍️ MohitCart
+        <nav className='sticky top-0 z-50 border-b border-violet-100 bg-white/90 px-4 py-3 backdrop-blur-xl md:px-8'>
+          <div className='mx-auto flex max-w-7xl items-center justify-between'>
+            <Link to='/' className='flex items-center gap-2 text-2xl font-black tracking-tight text-slate-900'>
+             <span className='grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-fuchsia-500 via-violet-600 to-indigo-600 text-lg text-white shadow-lg shadow-violet-200'>V</span> Velora
             </Link>
 
-            <div className='flex items-center gap-6'>
+            <div className='hidden items-center gap-6 text-sm font-bold text-slate-600 lg:flex'><Link to='/' className='hover:text-violet-700'>Home</Link><a href='/#collection' className='hover:text-violet-700'>Shop</a><Link to='/orders' className='hover:text-violet-700'>Orders</Link></div>
+
+            <div className='flex items-center gap-3 md:gap-5'>
                 {/* Login/SignUp or Logout */}
                 {!isLoggedIn ? (
                     <>
-                        <Link to='/login' className='text-gray-800 hover:text-gray-600 font-medium'>
+                        <Link to='/login' className='hidden text-sm font-semibold text-slate-700 hover:text-violet-600 sm:block'>
                             Login
                         </Link>
-                        <Link to='/signup' className='text-gray-800 hover:text-gray-600 font-medium'>
+                        <Link to='/signup' className='rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-500 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-violet-200 transition hover:scale-105'>
                             Sign Up
                         </Link>
                     </>
                 ) : (
-                    <button onClick={handleLogout} className='text-gray-800 hover:text-gray-600 font-medium'>
-                        Logout
-                    </button>
+                    <div className='relative' ref={menuRef}>
+                      <button onClick={() => setOpen(!open)} className='flex items-center gap-2 rounded-full p-1 pr-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-100'>
+                        <span className='grid h-8 w-8 place-items-center rounded-full bg-violet-100 font-bold text-violet-700'>{(profile?.username || 'U').charAt(0).toUpperCase()}</span>
+                        <span className='hidden max-w-24 truncate md:block'>{profile?.username || 'Account'}</span>
+                      </button>
+                      {open && <div className='absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-slate-100 bg-white p-2 shadow-xl'>
+                        <div className='border-b border-slate-100 px-3 py-2'><p className='truncate text-sm font-bold text-slate-900'>{profile?.username || 'Your account'}</p><p className='truncate text-xs text-slate-500'>{profile?.email}</p></div>
+                        <Link onClick={() => setOpen(false)} to='/profile' className='mt-1 block rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-violet-50 hover:text-violet-700'>My profile</Link>
+                        <Link onClick={() => setOpen(false)} to='/orders' className='block rounded-xl px-3 py-2 text-sm text-slate-700 hover:bg-violet-50 hover:text-violet-700'>My orders</Link>
+                        <button onClick={handleLogout} className='mt-1 w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-rose-600 hover:bg-rose-50'>Sign out</button>
+                      </div>}
+                    </div>
                 )}
             </div>
 
-            <Link to='/cart' className='relative text-gray-800 hover:text-gray-600 font-medium'>
-                🛒 Cart
+            <Link to='/cart' className='relative rounded-full bg-gradient-to-r from-violet-50 to-fuchsia-50 px-3 py-2 text-sm font-bold text-violet-700 ring-1 ring-violet-100 hover:from-violet-100 hover:to-fuchsia-100'>
+                Cart <span className='hidden sm:inline'>bag</span>
                 {cartCount > 0 && (
                     <span className='absolute -top-2 -right-3 bg-red-500 text-white text-xs font-bold rounded-full px-2'>
                         {cartCount}
                     </span>
                 )}
             </Link>
+          </div>
         </nav>
     )
 }
